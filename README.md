@@ -11,6 +11,7 @@ Notebook-based pipeline for converting raw TIF/TIFF astronomy images to FITS, st
 ## Project layout
 
 - `ncu-spots.ipynb` - main workflow notebook
+- `ncu_spots_utils.py` - reusable helper functions (image I/O, alignment, stacking, PSF fitting, plotting)
 - `raw_data/` - input images
 - `fits_outputs/` - converted FITS files
 - `fits_stacked/` - stacked FITS products and PDF report
