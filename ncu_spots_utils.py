@@ -23,10 +23,14 @@ from skimage.registration import phase_cross_correlation
 # Workspace / path helpers
 # ---------------------------------------------------------------------------
 
-# Absolute workspace root used when the notebook is run from a different CWD.
-# This is kept for backward compatibility with the original notebook; callers
-# can override it by passing explicit ``src_root`` / ``dst_root`` paths.
-WORKSPACE_ROOT = Path("/Users/chyan/Desktop/NCU Spotlight")
+# Workspace root used when the notebook is run from a different CWD.
+# This mirrors the original notebook's hard-coded path for backward
+# compatibility. It is intentionally overridable: callers can pass explicit
+# ``src_root`` / ``dst_root`` paths, or set the ``NCU_SPOTLIGHT_ROOT``
+# environment variable before importing this module.
+WORKSPACE_ROOT = Path(
+    __import__("os").environ.get("NCU_SPOTLIGHT_ROOT", "/Users/chyan/Desktop/NCU Spotlight")
+)
 
 
 def first_existing(candidates: list[Path]) -> Path:
@@ -353,6 +357,8 @@ def estimate_shift_correlation(
 # Stacking
 # ---------------------------------------------------------------------------
 
+STACK_WEIGHT = 0.5  # equal weighting when averaging the two aligned frames
+
 
 def stack_pair(
     data1: np.ndarray, data2: np.ndarray, shift_yx: tuple[float, float]
@@ -369,7 +375,7 @@ def stack_pair(
         )
         > 0.5
     )
-    return np.where(valid, 0.5 * (data1 + moved), np.nan)
+    return np.where(valid, STACK_WEIGHT * (data1 + moved), np.nan)
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +388,7 @@ BRIGHT_FLUX_QUANTILE = 0.7
 MAX_LABELS = 20
 OUTLIER_IQR_K = 1.5
 MIN_POINTS_FOR_IQR = 8
+# Conversion factor from Gaussian sigma to FWHM: 2 * sqrt(2 * ln(2))
 FWHM_SIGMA = 2.354820045
 
 
