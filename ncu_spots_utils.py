@@ -4,6 +4,11 @@ This module is meant to keep ncu-spots.ipynb clean: it holds the image
 pre-processing, alignment, stacking, source detection, PSF fitting and
 plotting utilities used by both the hybrid (SEP + phase) and the
 correlation-only workflows.
+
+Optional dependencies
+---------------------
+``convert_tiff_to_fits()`` requires ``tifffile``. The rest of the module does
+not depend on it, so ``tifffile`` is imported lazily inside that function.
 """
 
 from __future__ import annotations
@@ -196,7 +201,9 @@ def sharpness_score(stacked: np.ndarray, ref_coords: np.ndarray) -> float:
 
     if len(ref_coords) == 0:
         med = np.nanmedian(stacked[finite])
-        std = np.nanstd(stacked[finite]) + EPS
+        std = np.nanstd(stacked[finite])
+        if std <= 0:
+            return -np.inf
         return float((np.nanmax(stacked[finite]) - med) / std)
 
     vals = []
@@ -234,8 +241,8 @@ def estimate_shift_catalog(coords1: np.ndarray, flux1: np.ndarray, coords2: np.n
     dx = c1[:, None, 1] - c2[None, :, 1]
     deltas = np.column_stack([dy.ravel(), dx.ravel()])
 
-    q = np.round(deltas * CATALOG_BIN_FACTOR) / CATALOG_BIN_FACTOR
-    uniq, cnt = np.unique(q, axis=0, return_counts=True)
+    quantized = np.round(deltas * CATALOG_BIN_FACTOR) / CATALOG_BIN_FACTOR
+    uniq, cnt = np.unique(quantized, axis=0, return_counts=True)
     return (float(uniq[np.argmax(cnt), 0]), float(uniq[np.argmax(cnt), 1]))
 
 
@@ -412,6 +419,9 @@ OUTLIER_IQR_K = 1.5
 MIN_POINTS_FOR_IQR = 8
 # Conversion factor from Gaussian sigma to FWHM: 2 * sqrt(2 * ln(2))
 FWHM_SIGMA = 2.354820045
+PSF_INITIAL_SIGMA = 1.5
+PSF_INITIAL_THETA = 0.0
+PSF_MIN_AMP = 1e-3
 
 
 def gaussian2d_model(
@@ -462,8 +472,16 @@ def fit_psf_on_patch(
 
     z_med = np.nanmedian(z)
     z_peak = np.nanmax(z)
-    amp0 = max(z_peak - z_med, 1e-3)
-    p0 = [amp0, float(x - x1), float(y - y1), 1.5, 1.5, 0.0, z_med]
+    amp0 = max(z_peak - z_med, PSF_MIN_AMP)
+    p0 = [
+        amp0,
+        float(x - x1),
+        float(y - y1),
+        PSF_INITIAL_SIGMA,
+        PSF_INITIAL_SIGMA,
+        PSF_INITIAL_THETA,
+        z_med,
+    ]
     lower = [0.0, 0.0, 0.0, 0.3, 0.3, -np.pi / 2.0, -np.inf]
     upper = [np.inf, z.shape[1] - 1.0, z.shape[0] - 1.0, 8.0, 8.0, np.pi / 2.0, np.inf]
 
