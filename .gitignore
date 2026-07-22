@@ -2,6 +2,3 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-fits_outputs/
-fits_stacked/
-pdf_outputs/
