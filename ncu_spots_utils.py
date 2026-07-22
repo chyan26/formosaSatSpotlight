@@ -177,6 +177,16 @@ MATCH_RADIUS = 1.0
 MIN_MATCHES_OK = 2
 MAX_RMS_OK = 1.0
 
+EPS = 1e-6          # small offset to avoid division by zero
+CORR_EPS = 1e-12    # small offset for normalized correlation denominator
+N_REF_STARS = 12    # number of brightest stars used as sharpness references
+GRID_HALF_RANGE = 0.6   # +/- pixel range for local shift refinement
+GRID_STEP = 0.1         # pixel step for local shift refinement
+SCORE_MATCH_BONUS = 0.01
+SCORE_RMS_PENALTY = 0.02
+SCORE_BAD_RMS = 10.0
+CATALOG_BIN_FACTOR = 4.0  # granularity factor for 2D histogram mode estimation
+
 
 def sharpness_score(stacked: np.ndarray, ref_coords: np.ndarray) -> float:
     """Return a sharpness/peakedness score around reference star positions."""
@@ -186,7 +196,7 @@ def sharpness_score(stacked: np.ndarray, ref_coords: np.ndarray) -> float:
 
     if len(ref_coords) == 0:
         med = np.nanmedian(stacked[finite])
-        std = np.nanstd(stacked[finite]) + 1e-6
+        std = np.nanstd(stacked[finite]) + EPS
         return float((np.nanmax(stacked[finite]) - med) / std)
 
     vals = []
@@ -202,7 +212,7 @@ def sharpness_score(stacked: np.ndarray, ref_coords: np.ndarray) -> float:
         p = patch[ok]
         b = np.median(p)
         peak = np.max(p) - b
-        flux = np.sum(np.clip(p - b, 0.0, None)) + 1e-6
+        flux = np.sum(np.clip(p - b, 0.0, None)) + EPS
         vals.append(peak / flux)
 
     return float(np.median(vals)) if vals else -np.inf
@@ -224,7 +234,7 @@ def estimate_shift_catalog(coords1: np.ndarray, flux1: np.ndarray, coords2: np.n
     dx = c1[:, None, 1] - c2[None, :, 1]
     deltas = np.column_stack([dy.ravel(), dx.ravel()])
 
-    q = np.round(deltas * 4.0) / 4.0
+    q = np.round(deltas * CATALOG_BIN_FACTOR) / CATALOG_BIN_FACTOR
     uniq, cnt = np.unique(q, axis=0, return_counts=True)
     return (float(uniq[np.argmax(cnt), 0]), float(uniq[np.argmax(cnt), 1]))
 
@@ -262,13 +272,13 @@ def refine_shift(
     both images contain almost no valid pixels).
     """
     if len(coords1) > 0:
-        ref_coords = coords1[np.argsort(flux1)[-12:]]
+        ref_coords = coords1[np.argsort(flux1)[-N_REF_STARS:]]
     else:
         ref_coords = np.empty((0, 2))
 
     dy0, dx0 = base_shift
-    dy_grid = np.arange(dy0 - 0.6, dy0 + 0.6 + 1e-9, 0.1)
-    dx_grid = np.arange(dx0 - 0.6, dx0 + 0.6 + 1e-9, 0.1)
+    dy_grid = np.arange(dy0 - GRID_HALF_RANGE, dy0 + GRID_HALF_RANGE + 1e-9, GRID_STEP)
+    dx_grid = np.arange(dx0 - GRID_HALF_RANGE, dx0 + GRID_HALF_RANGE + 1e-9, GRID_STEP)
 
     best = None
     for dy in dy_grid:
@@ -277,7 +287,9 @@ def refine_shift(
             n_match, rms = match_stats(coords1, coords2, s, radius=MATCH_RADIUS)
             st = stack_pair(data1, data2, s)
             sharp = sharpness_score(st, ref_coords)
-            score = sharp + 0.01 * n_match - 0.02 * (rms if np.isfinite(rms) else 10.0)
+            score = sharp + SCORE_MATCH_BONUS * n_match - SCORE_RMS_PENALTY * (
+                rms if np.isfinite(rms) else SCORE_BAD_RMS
+            )
             if (best is None) or (score > best["score"]):
                 best = {"shift": s, "n_match": n_match, "rms": rms, "stacked": st, "score": score}
 
@@ -329,7 +341,7 @@ def corr_score(
     b = moved[valid].astype(np.float64)
     a -= np.mean(a)
     b -= np.mean(b)
-    denom = np.linalg.norm(a) * np.linalg.norm(b) + 1e-12
+    denom = np.linalg.norm(a) * np.linalg.norm(b) + CORR_EPS
     return float(np.dot(a, b) / denom)
 
 
@@ -611,14 +623,6 @@ def plot_fit_profiles(fig, spec, psf_fit: dict | None) -> None:
 # TIFF -> FITS conversion
 # ---------------------------------------------------------------------------
 
-try:
-    import tifffile
-except ImportError as exc:
-    raise ImportError(
-        "The 'tifffile' package is required for convert_tiff_to_fits(). "
-        "Install it with: pip install tifffile"
-    ) from exc
-
 
 def convert_tiff_to_fits(
     src_root: Path | str = "./NCU Spotlight/raw_data",
@@ -651,6 +655,8 @@ def convert_tiff_to_fits(
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
+            import tifffile
+
             image_data = tifffile.imread(str(tif_path))
             fits.PrimaryHDU(image_data).writeto(str(out_path), overwrite=True)
             print(f"CONVERTED: {tif_path.relative_to(src_root)} -> {out_path.relative_to(src_root)}")
