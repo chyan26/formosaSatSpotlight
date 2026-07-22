@@ -271,12 +271,33 @@ def refine_shift(
     coords2: np.ndarray,
     flux1: np.ndarray,
     base_shift: tuple[float, float],
-    fallback: tuple[float, float],
+    fallback_shift: tuple[float, float],
 ) -> dict[str, Any]:
     """Refine a candidate shift on a local grid and return the best candidate.
 
-    ``fallback`` is used when no valid grid candidate can be evaluated (e.g.
-    both images contain almost no valid pixels).
+    Parameters
+    ----------
+    data1, data2
+        The two images to be aligned and stacked.
+    coords1, coords2
+        Detected source coordinates (y, x) for each image.
+    flux1
+        Flux values for the sources in ``data1``; used to pick reference stars.
+    base_shift
+        Starting (dy, dx) shift estimate around which the local grid is built.
+    fallback_shift
+        (dy, dx) shift returned when no valid grid candidate can be evaluated
+        (e.g. both images contain almost no valid pixels).
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary with keys:
+        - ``shift``: tuple[float, float] -- selected (dy, dx) shift
+        - ``n_match``: int -- one-to-one matched stars at ``shift``
+        - ``rms``: float -- matching RMS at ``shift``
+        - ``stacked``: np.ndarray -- stacked image using ``shift``
+        - ``score``: float -- sharpness-based score used to pick ``shift``
     """
     if len(coords1) > 0:
         ref_coords = coords1[np.argsort(flux1)[-N_REF_STARS:]]
@@ -302,10 +323,10 @@ def refine_shift(
 
     if best is None:
         best = {
-            "shift": fallback,
+            "shift": fallback_shift,
             "n_match": 0,
             "rms": np.inf,
-            "stacked": stack_pair(data1, data2, fallback),
+            "stacked": stack_pair(data1, data2, fallback_shift),
             "score": -np.inf,
         }
     return best
@@ -453,7 +474,19 @@ def gaussian2d_model(
 def fit_psf_on_patch(
     image: np.ndarray, x: float, y: float, half_size: int = 6
 ) -> dict[str, Any] | None:
-    """Fit a 2D Gaussian to a patch centered on ``(x, y)`` and return fit info."""
+    """Fit a 2D Gaussian to a patch centered on ``(x, y)`` and return fit info.
+
+    Returns
+    -------
+    dict[str, Any] | None
+        If the fit succeeds, returns a dictionary with keys:
+        - ``x``, ``y``: float -- fitted star center in full-image coordinates
+        - ``fwhm``: float -- circularized full-width at half-maximum (pixels)
+        - ``patch``: np.ndarray -- cutout used for fitting
+        - ``model``: np.ndarray -- best-fit Gaussian rendered on the cutout
+        - ``x0_local``, ``y0_local``: float -- fitted center in cutout coordinates
+        Returns ``None`` if the patch is too small or the fit fails.
+    """
     ny, nx = image.shape
     xi, yi = int(round(x)), int(round(y))
     x1, x2 = max(0, xi - half_size), min(nx, xi + half_size + 1)
@@ -596,7 +629,11 @@ def filter_outliers_iqr(
 # ---------------------------------------------------------------------------
 
 
-def plot_fit_profiles(fig, spec, psf_fit: dict | None) -> None:
+def plot_fit_profiles(
+    fig: "matplotlib.figure.Figure",
+    spec: "matplotlib.gridspec.SubplotSpec",
+    psf_fit: dict | None,
+) -> None:
     """Draw X/Y intensity profiles (data vs. fit) for a PSF fit."""
     ax_x = fig.add_subplot(spec[0, 0])
     ax_y = fig.add_subplot(spec[1, 0])
