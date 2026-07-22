@@ -209,7 +209,11 @@ def sharpness_score(stacked: np.ndarray, ref_coords: np.ndarray) -> float:
 
 
 def estimate_shift_catalog(coords1: np.ndarray, flux1: np.ndarray, coords2: np.ndarray, flux2: np.ndarray) -> tuple[float, float]:
-    """Estimate global shift from the mode of bright-star pairwise offsets."""
+    """Estimate global shift from the mode of bright-star pairwise offsets.
+
+    Uses the ``N_BRIGHT`` brightest stars from each catalog. If either catalog
+    is empty, returns ``FALLBACK_SHIFT``.
+    """
     if len(coords1) == 0 or len(coords2) == 0:
         return FALLBACK_SHIFT
 
@@ -250,9 +254,13 @@ def refine_shift(
     coords2: np.ndarray,
     flux1: np.ndarray,
     base_shift: tuple[float, float],
-    fallback: tuple[float, float] = FALLBACK_SHIFT,
+    fallback: tuple[float, float],
 ) -> dict[str, Any]:
-    """Refine a candidate shift on a local grid and return the best candidate."""
+    """Refine a candidate shift on a local grid and return the best candidate.
+
+    ``fallback`` is used when no valid grid candidate can be evaluated (e.g.
+    both images contain almost no valid pixels).
+    """
     if len(coords1) > 0:
         ref_coords = coords1[np.argsort(flux1)[-12:]]
     else:
@@ -605,7 +613,7 @@ def plot_fit_profiles(fig, spec, psf_fit: dict | None) -> None:
 
 try:
     import tifffile
-except ImportError as exc:  # pragma: no cover
+except ImportError as exc:
     raise ImportError(
         "The 'tifffile' package is required for convert_tiff_to_fits(). "
         "Install it with: pip install tifffile"
