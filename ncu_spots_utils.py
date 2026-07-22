@@ -8,8 +8,10 @@ correlation-only workflows.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import sep
@@ -29,7 +31,7 @@ from skimage.registration import phase_cross_correlation
 # ``src_root`` / ``dst_root`` paths, or set the ``NCU_SPOTLIGHT_ROOT``
 # environment variable before importing this module.
 WORKSPACE_ROOT = Path(
-    __import__("os").environ.get("NCU_SPOTLIGHT_ROOT", "/Users/chyan/Desktop/NCU Spotlight")
+    os.environ.get("NCU_SPOTLIGHT_ROOT", "/Users/chyan/Desktop/NCU Spotlight")
 )
 
 
@@ -249,7 +251,7 @@ def refine_shift(
     flux1: np.ndarray,
     base_shift: tuple[float, float],
     fallback: tuple[float, float] = FALLBACK_SHIFT,
-) -> dict:
+) -> dict[str, Any]:
     """Refine a candidate shift on a local grid and return the best candidate."""
     if len(coords1) > 0:
         ref_coords = coords1[np.argsort(flux1)[-12:]]
@@ -420,7 +422,7 @@ def gaussian2d_model(
 
 def fit_psf_on_patch(
     image: np.ndarray, x: float, y: float, half_size: int = 6
-) -> dict | None:
+) -> dict[str, Any] | None:
     """Fit a 2D Gaussian to a patch centered on ``(x, y)`` and return fit info."""
     ny, nx = image.shape
     xi, yi = int(round(x)), int(round(y))
@@ -601,6 +603,14 @@ def plot_fit_profiles(fig, spec, psf_fit: dict | None) -> None:
 # TIFF -> FITS conversion
 # ---------------------------------------------------------------------------
 
+try:
+    import tifffile
+except ImportError as exc:  # pragma: no cover
+    raise ImportError(
+        "The 'tifffile' package is required for convert_tiff_to_fits(). "
+        "Install it with: pip install tifffile"
+    ) from exc
+
 
 def convert_tiff_to_fits(
     src_root: Path | str = "./NCU Spotlight/raw_data",
@@ -633,8 +643,6 @@ def convert_tiff_to_fits(
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         try:
-            import tifffile
-
             image_data = tifffile.imread(str(tif_path))
             fits.PrimaryHDU(image_data).writeto(str(out_path), overwrite=True)
             print(f"CONVERTED: {tif_path.relative_to(src_root)} -> {out_path.relative_to(src_root)}")
