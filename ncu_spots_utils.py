@@ -24,11 +24,17 @@ from skimage.registration import phase_cross_correlation
 # ---------------------------------------------------------------------------
 
 # Absolute workspace root used when the notebook is run from a different CWD.
+# This is kept for backward compatibility with the original notebook; callers
+# can override it by passing explicit ``src_root`` / ``dst_root`` paths.
 WORKSPACE_ROOT = Path("/Users/chyan/Desktop/NCU Spotlight")
 
 
 def first_existing(candidates: list[Path]) -> Path:
-    """Return the first path in ``candidates`` that exists, or the first one."""
+    """Return the first path in ``candidates`` that exists.
+
+    If none of the candidates exist, the first candidate is returned as the
+    fallback (the caller can then create it or raise an error as needed).
+    """
     return next((p for p in candidates if p.exists()), candidates[0])
 
 
