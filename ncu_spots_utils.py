@@ -714,7 +714,7 @@ def convert_tiff_to_fits(
 
             image_data = tifffile.imread(str(tif_path))
             fits.PrimaryHDU(image_data).writeto(str(out_path), overwrite=True)
-            print(f"CONVERTED: {tif_path.relative_to(src_root)} -> {out_path.relative_to(src_root)}")
+            print(f"CONVERTED: {tif_path.relative_to(src_root)} -> {out_path.relative_to(dst_root)}")
             converted += 1
         except Exception as exc:
             print(f"FAILED: {tif_path.relative_to(src_root)} ({exc})")
