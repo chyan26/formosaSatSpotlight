@@ -14,7 +14,6 @@ not depend on it, so ``tifffile`` is imported lazily inside that function.
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 from typing import Any
 
