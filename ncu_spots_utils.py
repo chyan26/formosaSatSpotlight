@@ -271,7 +271,7 @@ def refine_shift(
     coords2: np.ndarray,
     flux1: np.ndarray,
     base_shift: tuple[float, float],
-    fallback_shift: tuple[float, float],
+    fallback_shift: tuple[float, float] = FALLBACK_SHIFT,
 ) -> dict[str, Any]:
     """Refine a candidate shift on a local grid and return the best candidate.
 
