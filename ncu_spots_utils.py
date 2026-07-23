@@ -35,8 +35,7 @@ from skimage.registration import phase_cross_correlation
 # ``src_root`` / ``dst_root`` paths, or set the ``NCU_SPOTLIGHT_ROOT``
 # environment variable before importing this module.
 WORKSPACE_ROOT = Path(
-    os.environ.get("NCU_SPOTLIGHT_ROOT", "/Users/chyan/Desktop/NCU Spotlight")
-)
+    os.environ.get("NCU_SPOTLIGHT_ROOT", "/Users/chyan/Project/formosaSatSpotlight")
 
 
 def first_existing(candidates: list[Path]) -> Path:
@@ -58,17 +57,13 @@ def get_roots() -> tuple[Path, Path]:
     fits_root = first_existing(
         [
             WORKSPACE_ROOT / "fits_outputs",
-            WORKSPACE_ROOT / "NCU Spotlight" / "fits_outputs",
             Path.cwd() / "fits_outputs",
-            Path.cwd() / "NCU Spotlight" / "fits_outputs",
         ]
     )
     stack_root = first_existing(
         [
             WORKSPACE_ROOT / "fits_stacked",
-            WORKSPACE_ROOT / "NCU Spotlight" / "fits_stacked",
             Path.cwd() / "fits_stacked",
-            Path.cwd() / "NCU Spotlight" / "fits_stacked",
         ]
     )
     stack_root.mkdir(parents=True, exist_ok=True)
@@ -471,7 +466,7 @@ def gaussian2d_model(
 
 
 def fit_psf_on_patch(
-    image: np.ndarray, x: float, y: float, half_size: int = 6
+    image: np.ndarray, x: float, y: float, half_size: int = 6, hr_scale: int = 1
 ) -> dict[str, Any] | None:
     """Fit a 2D Gaussian to a patch centered on ``(x, y)`` and return fit info.
 
@@ -484,6 +479,8 @@ def fit_psf_on_patch(
         - ``patch``: np.ndarray -- cutout used for fitting
         - ``model``: np.ndarray -- best-fit Gaussian rendered on the cutout
         - ``x0_local``, ``y0_local``: float -- fitted center in cutout coordinates
+        - ``model_hr``: np.ndarray | None -- optional higher-resolution model
+        - ``hr_scale``: int -- sampling factor used for ``model_hr``
         Returns ``None`` if the patch is too small or the fit fails.
     """
     ny, nx = image.shape
@@ -536,12 +533,22 @@ def fit_psf_on_patch(
     fwhm = FWHM_SIGMA * sigma
     model = gaussian2d_model((xx, yy), *popt).reshape(z.shape)
 
+    model_hr = None
+    if hr_scale is not None and int(hr_scale) > 1:
+        hr = int(hr_scale)
+        x_hr = np.linspace(0, z.shape[1] - 1, z.shape[1] * hr)
+        y_hr = np.linspace(0, z.shape[0] - 1, z.shape[0] * hr)
+        xx_hr, yy_hr = np.meshgrid(x_hr, y_hr)
+        model_hr = gaussian2d_model((xx_hr, yy_hr), *popt).reshape((z.shape[0] * hr, z.shape[1] * hr))
+
     return {
         "x": x1 + float(x0),
         "y": y1 + float(y0),
         "fwhm": float(fwhm),
         "patch": z,
         "model": model,
+        "model_hr": model_hr,
+        "hr_scale": int(hr_scale) if hr_scale is not None else 1,
         "x0_local": float(x0),
         "y0_local": float(y0),
     }
@@ -552,9 +559,17 @@ def measure_psf_for_bright_stars(
     thresh: float = SEP_THRESH_SIGMA,
     minarea: int = SEP_MINAREA,
     bright_flux_quantile: float = BRIGHT_FLUX_QUANTILE,
-    max_labels: int = MAX_LABELS,
+    max_labels: int | None = MAX_LABELS,
+    measure_all: bool = False,
+    max_stars: int | None = None,
+    half_size: int = 6,
 ) -> list[dict]:
-    """Detect stars with SEP and fit a Gaussian PSF to the bright ones."""
+    """Detect stars with SEP and fit a Gaussian PSF.
+
+    When ``measure_all`` is true, fits every detected source up to
+    ``max_stars``. Otherwise it keeps the brightest fraction defined by
+    ``bright_flux_quantile`` and caps the result at ``max_labels``.
+    """
     finite = np.isfinite(stacked)
     if np.count_nonzero(finite) < 100:
         return []
@@ -568,15 +583,22 @@ def measure_psf_for_bright_stars(
     if len(objects) == 0:
         return []
 
-    flux = np.asarray(objects["flux"], dtype=np.float64)
-    flux_cut = np.quantile(flux, bright_flux_quantile)
-
-    bright = [o for o in objects if float(o["flux"]) >= float(flux_cut)]
-    bright = sorted(bright, key=lambda o: float(o["flux"]), reverse=True)[:max_labels]
+    objs = list(objects)
+    if not measure_all:
+        flux = np.asarray(objects["flux"], dtype=np.float64)
+        flux_cut = np.quantile(flux, bright_flux_quantile)
+        objs = [o for o in objs if float(o["flux"]) >= float(flux_cut)]
+        objs = sorted(objs, key=lambda o: float(o["flux"]), reverse=True)
+        if max_labels is not None:
+            objs = objs[:max_labels]
+    else:
+        objs = sorted(objs, key=lambda o: float(o["flux"]), reverse=True)
+        if max_stars is not None and len(objs) > max_stars:
+            objs = objs[:max_stars]
 
     psf_list: list[dict] = []
-    for o in bright:
-        res = fit_psf_on_patch(sub, float(o["x"]), float(o["y"]), half_size=6)
+    for o in objs:
+        res = fit_psf_on_patch(sub, float(o["x"]), float(o["y"]), half_size=half_size, hr_scale=1)
         if res is not None and np.isfinite(res["fwhm"]):
             res["flux"] = float(o["flux"])
             psf_list.append(res)
@@ -645,7 +667,9 @@ def plot_fit_profiles(
         return
 
     patch = psf_fit["patch"]
-    model = psf_fit["model"]
+    model = psf_fit.get("model")
+    model_hr = psf_fit.get("model_hr")
+    hr_scale = int(psf_fit.get("hr_scale", 1))
     row_idx = int(np.clip(round(psf_fit["y0_local"]), 0, patch.shape[0] - 1))
     col_idx = int(np.clip(round(psf_fit["x0_local"]), 0, patch.shape[1] - 1))
 
@@ -653,9 +677,16 @@ def plot_fit_profiles(
     y_coords = np.arange(patch.shape[0], dtype=np.float64)
 
     ax_x.plot(x_coords, patch[row_idx, :], "o", color="black", markersize=3, label="Data")
-    ax_x.plot(
-        x_coords, model[row_idx, :], "-", color="crimson", linewidth=1.8, label="Fit"
-    )
+    if model_hr is not None and hr_scale > 1:
+        row_hr = int(np.clip(round(psf_fit["y0_local"] * hr_scale), 0, model_hr.shape[0] - 1))
+        x_hr_coords = np.linspace(0, patch.shape[1] - 1, patch.shape[1] * hr_scale)
+        ax_x.plot(
+            x_hr_coords, model_hr[row_hr, :], "-", color="crimson", linewidth=1.8, label="Fit"
+        )
+    else:
+        ax_x.plot(
+            x_coords, model[row_idx, :], "-", color="crimson", linewidth=1.8, label="Fit"
+        )
     ax_x.set_title(f"X profile @ y={row_idx}")
     ax_x.set_xlabel("Patch X")
     ax_x.set_ylabel("Intensity")
@@ -663,9 +694,16 @@ def plot_fit_profiles(
     ax_x.legend(fontsize=8)
 
     ax_y.plot(y_coords, patch[:, col_idx], "o", color="black", markersize=3, label="Data")
-    ax_y.plot(
-        y_coords, model[:, col_idx], "-", color="royalblue", linewidth=1.8, label="Fit"
-    )
+    if model_hr is not None and hr_scale > 1:
+        col_hr = int(np.clip(round(psf_fit["x0_local"] * hr_scale), 0, model_hr.shape[1] - 1))
+        y_hr_coords = np.linspace(0, patch.shape[0] - 1, patch.shape[0] * hr_scale)
+        ax_y.plot(
+            y_hr_coords, model_hr[:, col_hr], "-", color="royalblue", linewidth=1.8, label="Fit"
+        )
+    else:
+        ax_y.plot(
+            y_coords, model[:, col_idx], "-", color="royalblue", linewidth=1.8, label="Fit"
+        )
     ax_y.set_title(f"Y profile @ x={col_idx}")
     ax_y.set_xlabel("Patch Y")
     ax_y.set_ylabel("Intensity")
